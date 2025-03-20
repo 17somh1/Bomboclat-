@@ -2,6 +2,7 @@
 import json  # For working with JSON data
 import logging  # For logging messages
 import yaml  # For parsing YAML configuration files
+import os
 from censys.search import CensysHosts, CensysCerts  # Censys API clients
 from pycti import OpenCTIConnectorHelper, StixCyberObservable  # OpenCTI helper and STIX classes
 
@@ -12,37 +13,32 @@ logger = logging.getLogger(__name__)  # Create a logger for the module
 
 class ConfigConnector:
     """
-    Handles loading and validating the connector configuration from a YAML file.
+    Handles loading and validating the connector configuration from environment variables.
     """
 
     def __init__(self):
-        try:
-            # Load configuration from config.yml
-            with open("config.yml", "r") as file:
-                self.config = yaml.safe_load(file)
+        # Define required configuration keys and their corresponding environment variables
+        required_keys = {
+            "censys_api_id": "CENSYS_API_ID",
+            "censys_api_secret": "CENSYS_API_SECRET",
+            "opencti_url": "OPENCTI_URL",
+            "opencti_token": "OPENCTI_TOKEN",
+            "connector_id": "CONNECTOR_ID"
+        }
 
-            # Define required configuration keys
-            required_keys = [
-                "censys_api_id", "censys_api_secret",
-                "opencti_url", "opencti_token", "connector_id"
-            ]
+        self.config = {}
 
-            # Validate that all required keys are present
-            for key in required_keys:
-                if key not in self.config:
-                    logger.critical(f"Missing required configuration key: {key}")
-                    exit(1)
+        # Validate that all required environment variables are set
+        for key, env_var in required_keys.items():
+            value = os.getenv(env_var)
+            if not value:
+                logger.critical(f"Missing required environment variable: {env_var}")
+                exit(1)
+            self.config[key] = value
 
-            # Set default values for optional configuration parameters
-            self.config.setdefault("connector_scope", ["IPv4-Addr", "Domain-Name", "X509-Certificate"])
-            self.config.setdefault("max_tlp", "TLP:AMBER")
-
-        except FileNotFoundError:
-            logger.critical("Configuration file 'config.yml' not found. Exiting...")
-            exit(1)
-        except yaml.YAMLError as e:
-            logger.critical(f"Error parsing configuration file: {e}")
-            exit(1)
+        # Set default values for optional configuration parameters
+        self.config.setdefault("connector_scope", ["IPv4-Addr", "Domain-Name", "X509-Certificate"])
+        self.config.setdefault("max_tlp", "TLP:AMBER")
 
     @property
     def load(self):
