@@ -1,0 +1,97 @@
+def _format_result(self, observable_type, observable_value):
+    try:
+        if observable_type == "IPv4-Addr" or observable_type == "IPv6-Addr":
+            host = self.hosts.view(observable_value)
+            services = host.get("services", [])
+            country = host.get("location", {}).get("country", "N/A")
+            city = host.get("location", {}).get("city", "N/A")
+            latitude = host.get("location", {}).get("latitude", "N/A")
+            longitude = host.get("location", {}).get("longitude", "N/A")
+            asn_info = host.get("autonomous_system", {})
+            asn = asn_info.get("asn", "N/A")
+            as_org = asn_info.get("organization", "N/A")
+            tags = ", ".join(host.get("tags", [])) or "None"
+            last_updated = host.get("last_updated_at", "N/A")
+
+            markdown = f"## 🔍 Censys Enrichment: IP {observable_value}\n\n"
+            markdown += f"**Country:** {country} ({city})\n"
+            markdown += f"**Coordinates:** {latitude}, {longitude}\n"
+            markdown += f"**ASN:** {asn} ({as_org})\n"
+            markdown += f"**Tags:** {tags}\n"
+            markdown += f"**Last Updated:** {last_updated}\n"
+            markdown += f"**Open Ports:** {', '.join(str(s['port']) for s in services)}\n\n"
+
+            markdown += "### Services:\n"
+            for s in services:
+                port = s.get("port")
+                name = s.get("service_name", "Unknown")
+                extended = s.get("extended_service_name", "Unknown")
+                product = s.get("software", [{}])[0].get("product") if s.get("software") else "N/A"
+                cert_sha256 = s.get("tls", {}).get("certificate", {}).get("fingerprint_sha256", None)
+
+                markdown += f"- Port {port}: {name} ({extended}) - **Product:** {product}"
+                if cert_sha256:
+                    markdown += f" - **TLS Cert SHA-256:** `{cert_sha256}`"
+                markdown += "\n"
+
+            markdown += f"\n[View on Censys](https://search.censys.io/hosts/{observable_value})"
+            return markdown
+
+        elif observable_type == "Domain-Name":
+            certs_pages = self.certs.search(f"names: {observable_value}", per_page=100)
+            markdown = f"## 🔍 Censys Enrichment: Domain {observable_value}\n\n### Certificates:\n"
+            for page in certs_pages:
+                for cert in page:
+                    names = ", ".join(cert.get("names", []))
+                    issuer = cert.get("issuer", {}).get("organization", "N/A")
+                    sha256 = cert.get("fingerprint_sha256", "N/A")
+                    valid_from = cert.get("validity", {}).get("start", "N/A")
+                    valid_to = cert.get("validity", {}).get("end", "N/A")
+                    serial = cert.get("serial_number", "N/A")
+                    subject_cn = cert.get("subject", {}).get("common_name", "N/A")
+                    self_signed = cert.get("parsed", {}).get("is_self_signed", False)
+                    key_info = cert.get("parsed", {}).get("subject_key_info", {})
+                    key_algo = key_info.get("key_algorithm", "N/A")
+                    key_size = key_info.get("rsa_public_key", {}).get("length", "N/A")
+
+                    markdown += f"- **SHA-256:** `{sha256}`\n"
+                    markdown += f"  - **Names:** {names}\n"
+                    markdown += f"  - **Issuer:** {issuer}\n"
+                    markdown += f"  - **Subject CN:** {subject_cn}\n"
+                    markdown += f"  - **Serial Number:** {serial}\n"
+                    markdown += f"  - **Valid:** {valid_from} to {valid_to}\n"
+                    markdown += f"  - **Self-Signed:** {self_signed}\n"
+                    markdown += f"  - **Key:** {key_algo} ({key_size} bits)\n\n"
+
+            markdown += f"[View on Censys](https://search.censys.io/domains/{observable_value})"
+            return markdown
+
+        elif observable_type == "X509-Certificate-SHA256":
+            cert = self.certs.view(observable_value)
+            names = ", ".join(cert.get("names", []))
+            issuer = cert.get("issuer", {}).get("organization", "N/A")
+            valid_from = cert.get("validity", {}).get("start", "N/A")
+            valid_to = cert.get("validity", {}).get("end", "N/A")
+            serial = cert.get("serial_number", "N/A")
+            subject_cn = cert.get("subject", {}).get("common_name", "N/A")
+            self_signed = cert.get("parsed", {}).get("is_self_signed", False)
+            key_info = cert.get("parsed", {}).get("subject_key_info", {})
+            key_algo = key_info.get("key_algorithm", "N/A")
+            key_size = key_info.get("rsa_public_key", {}).get("length", "N/A")
+
+            markdown = f"## 🔍 Censys Enrichment: Certificate `{observable_value}`\n\n"
+            markdown += f"- **Names:** {names}\n"
+            markdown += f"- **Subject CN:** {subject_cn}\n"
+            markdown += f"- **Issuer:** {issuer}\n"
+            markdown += f"- **Serial Number:** {serial}\n"
+            markdown += f"- **Valid:** {valid_from} to {valid_to}\n"
+            markdown += f"- **Self-Signed:** {self_signed}\n"
+            markdown += f"- **Key:** {key_algo} ({key_size} bits)\n"
+            markdown += f"\n[View on Censys](https://search.censys.io/certificates/{observable_value})"
+            return markdown
+
+        else:
+            return None
+
+    except Exception as e:
+        return f"⚠️ Error during enrichment: {str(e)}"
