@@ -26,32 +26,30 @@ def _format_result(self, observable_type, observable_value):
             last_updated = host.get("last_updated_at", "N/A")
             cert = host.get("certificate", None)
 
-            markdown = f"""## 🔍 Censys Enrichment: IP `{observable_value}`
+            markdown = f"## 🔍 Censys Enrichment: IP `{observable_value}`\n\n"
+            markdown += "### 🗺️ Location\n"
+            markdown += f"- Country: {country}\n"
+            markdown += f"- City: {city}\n"
+            markdown += f"- Coordinates: {latitude}, {longitude}\n\n"
 
-### 🗺️ Location
-- Country: {country}
-- City: {city}
-- Coordinates: {latitude}, {longitude}
+            markdown += "### 🏢 ASN Info\n"
+            markdown += f"- ASN: {asn}\n"
+            markdown += f"- Name: {asn_name}\n"
+            markdown += f"- Description: {asn_desc}\n"
+            markdown += f"- BGP Prefix: {bgp_prefix}\n\n"
 
-### 🏢 ASN Info
-- ASN: {asn}
-- Name: {asn_name}
-- Description: {asn_desc}
-- BGP Prefix: {bgp_prefix}
+            markdown += "### 🏷️ Metadata\n"
+            markdown += f"- Tags: {tags}\n"
+            markdown += f"- Last Updated: {last_updated}\n\n"
 
-### 🏷️ Metadata
-- Tags: {tags}
-- Last Updated: {last_updated}
+            markdown += "### 🖥️ Operating System\n"
+            markdown += f"- {os_name} {os_version} ({os_vendor})\n"
+            markdown += f"- CPE: `{os_cpe}`\n\n"
 
-### 🖥️ Operating System
-- {os_name} {os_version} ({os_vendor})
-- CPE: `{os_cpe}`
+            markdown += "### 🔓 Open Ports\n"
+            markdown += f"{', '.join(str(s['port']) for s in services) or 'None'}\n\n"
 
-### 🔓 Open Ports
-{', '.join(str(s['port']) for s in services) or 'None'}
-
-### ⚙️ Services
-"""
+            markdown += "### ⚙️ Services\n"
             for s in services:
                 port = s.get("port")
                 name = s.get("service_name", "Unknown")
@@ -60,43 +58,41 @@ def _format_result(self, observable_type, observable_value):
                 product = s.get("software", [{}])[0].get("product") if s.get("software") else "N/A"
                 cert_sha256 = s.get("tls", {}).get("certificate", {}).get("fingerprint_sha256")
 
-                markdown += f"""- **Port {port}/{transport}**
-  - Service: {name} ({extended})
-  - Product: {product}"""
+                markdown += f"- **Port {port}/{transport}**\n"
+                markdown += f"  - Service: {name} ({extended})\n"
+                markdown += f"  - Product: {product}\n"
 
                 dns_type = s.get("dns", {}).get("server_type")
                 if dns_type:
-                    markdown += f"\n  - DNS Server Type: {dns_type}"
+                    markdown += f"  - DNS Server Type: {dns_type}\n"
 
                 http_resp = s.get("http", {}).get("response", {})
                 status_code = http_resp.get("status_code")
                 if status_code:
                     server_header = http_resp.get("headers", {}).get("Server", ["N/A"])[0]
-                    markdown += f"\n  - HTTP Status: {status_code} ({server_header})"
+                    markdown += f"  - HTTP Status: {status_code} ({server_header})\n"
 
                 if cert_sha256:
-                    markdown += f"\n  - TLS Cert SHA-256: `{cert_sha256}`"
+                    markdown += f"  - TLS Cert SHA-256: `{cert_sha256}`\n"
 
                 markdown += "\n"
 
             if cert:
-                markdown += f"\n🔐 **Top-level Certificate:** `{cert}`\n"
+                markdown += f"🔐 **Top-level Certificate:** `{cert}`\n\n"
 
-            markdown += f"\n🔗 [View on Censys](https://search.censys.io/hosts/{observable_value})"
+            markdown += f"🔗 [View on Censys](https://search.censys.io/hosts/{observable_value})"
             return markdown
 
         elif observable_type == "Domain-Name":
             certs_pages = self.certs.search(f"names: {observable_value}", per_page=100)
 
-            markdown = f"""## 🔍 Censys Enrichment: Domain `{observable_value}`
-
-### 📄 Associated Certificates
-"""
+            markdown = f"## 🔍 Censys Enrichment: Domain `{observable_value}`\n\n"
+            markdown += "### 📄 Associated Certificates\n"
             for page in certs_pages:
                 for cert in page:
                     sha256 = cert.get("fingerprint_sha256", "N/A")
                     raw_names = cert.get("names", [])
-                    names = ", ".join(sum(raw_names, [])) if raw_names else "N/A"
+                    names = ", ".join(raw_names) if raw_names else "N/A"
 
                     parsed = cert.get("parsed", {})
                     subject_dn = parsed.get("subject_dn", "N/A")
@@ -105,20 +101,19 @@ def _format_result(self, observable_type, observable_value):
                     valid_from = validity.get("not_before", "N/A")
                     valid_to = validity.get("not_after", "N/A")
 
-                    markdown += f"""- **SHA-256:** `{sha256}`
-  - Names: {names}
-  - Subject DN: {subject_dn}
-  - Issuer DN: {issuer_dn}
-  - Validity: {valid_from} → {valid_to}
-
-"""
+                    markdown += f"- **SHA-256:** `{sha256}`\n"
+                    markdown += f"  - Names: {names}\n"
+                    markdown += f"  - Subject DN: {subject_dn}\n"
+                    markdown += f"  - Issuer DN: {issuer_dn}\n"
+                    markdown += f"  - Validity: {valid_from} → {valid_to}\n\n"
 
             markdown += f"🔗 [View on Censys](https://search.censys.io/domains/{observable_value})"
             return markdown
 
         elif observable_type == "X509-Certificate-SHA256":
             cert = self.certs.view(observable_value)
-            names = ", ".join(cert.get("names", []))
+            raw_names = cert.get("names", [])
+            names = ", ".join(raw_names) if raw_names else "N/A"
 
             parsed = cert.get("parsed", {})
             subject_dn = parsed.get("subject_dn", "N/A")
@@ -132,21 +127,19 @@ def _format_result(self, observable_type, observable_value):
             key_algo = key_info.get("key_algorithm", "N/A")
             key_size = key_info.get("rsa_public_key", {}).get("length", "N/A")
 
-            markdown = f"""## 🔍 Censys Enrichment: Certificate `{observable_value}`
+            markdown = f"## 🔍 Censys Enrichment: Certificate `{observable_value}`\n\n"
+            markdown += "### 🧾 Certificate Info\n"
+            markdown += f"- Names: {names}\n"
+            markdown += f"- Subject DN: {subject_dn}\n"
+            markdown += f"- Issuer DN: {issuer_dn}\n"
+            markdown += f"- Validity: {valid_from} → {valid_to}\n"
+            markdown += f"- Self-Signed: {self_signed}\n\n"
 
-### 🧾 Certificate Info
-- Names: {names}
-- Subject DN: {subject_dn}
-- Issuer DN: {issuer_dn}
-- Validity: {valid_from} → {valid_to}
-- Self-Signed: {self_signed}
+            markdown += "### 🔐 Public Key\n"
+            markdown += f"- Algorithm: {key_algo}\n"
+            markdown += f"- Size: {key_size} bits\n\n"
 
-### 🔐 Public Key
-- Algorithm: {key_algo}
-- Size: {key_size} bits
-
-🔗 [View on Censys](https://search.censys.io/certificates/{observable_value})
-"""
+            markdown += f"🔗 [View on Censys](https://search.censys.io/certificates/{observable_value})"
             return markdown
 
     except Exception as e:
