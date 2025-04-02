@@ -1,0 +1,280 @@
+def _format_result(self, observable_type, observable_value):
+    try:
+        from datetime import datetime, timezone
+
+        # Helper to calculate days between two ISO 8601 timestamps
+        def _days_between(date1, date2):
+            try:
+                d1 = datetime.fromisoformat(date1.replace("Z", "+00:00"))
+                d2 = datetime.fromisoformat(date2.replace("Z", "+00:00"))
+                return (d2 - d1).days
+            except:
+                return "N/A"
+
+        # Helper to return current UTC time in ISO format
+        def _current_utc_iso():
+            return datetime.now(timezone.utc).isoformat()
+
+        # === Enrichment for IP addresses ===
+        if observable_type in ["IPv4-Addr", "IPv6-Addr"]:
+            host = self.hosts.view(observable_value)
+            services = host.get("services", [])
+            location = host.get("location", {})
+            coords = location.get("coordinates", {})
+            country = location.get("country", "N/A")
+            city = location.get("city", "N/A")
+            latitude = float(coords.get("latitude")) if coords.get("latitude") else "N/A"
+            longitude = float(coords.get("longitude")) if coords.get("longitude") else "N/A"
+
+            # ASN info
+            asn_info = host.get("autonomous_system", {})
+            asn = asn_info.get("asn", "N/A")
+            asn_name = asn_info.get("name", "N/A")
+            asn_desc = asn_info.get("description", "N/A")
+            bgp_prefix = asn_info.get("bgp_prefix", "N/A")
+
+            # OS info
+            os_info = host.get("operating_system", {})
+            os_name = os_info.get("product", "N/A")
+            os_version = os_info.get("version", "")
+            os_vendor = os_info.get("vendor", "")
+            os_cpe = os_info.get("uniform_resource_identifier", "N/A")
+
+            tags = ", ".join(host.get("tags", [])) or "None"
+            last_updated = host.get("last_updated_at", "N/A")
+            cert = host.get("certificate")
+
+            # Markdown formatting
+            markdown = f"## 🔍 Censys Enrichment: IP {observable_value}\n\n"
+
+            markdown += "### 🗺️ Location\n"
+            markdown += f"- Country: {country}\n"
+            markdown += f"- City: {city}\n"
+            markdown += f"- Coordinates: {latitude}, {longitude}\n\n"
+
+            markdown += "### 🏢 ASN Info\n"
+            markdown += f"- ASN: {asn}\n"
+            markdown += f"- Name: {asn_name}\n"
+            markdown += f"- Description: {asn_desc}\n"
+            markdown += f"- BGP Prefix: {bgp_prefix}\n\n"
+
+            markdown += "### 🏷️ Metadata\n"
+            markdown += f"- Tags: {tags}\n"
+            markdown += f"- Last Updated: {last_updated}\n\n"
+
+            markdown += "### 🖥️ Operating System\n"
+            markdown += f"- {os_name} {os_version} ({os_vendor})\n"
+            markdown += f"- CPE: {os_cpe}\n\n"
+
+            markdown += "### 🔓 Open Ports\n"
+            open_ports = [
+                f"{s['port']}{' ⚠️' if s['port'] in [22, 23, 445, 3389] else ''}"
+                for s in services
+            ]
+            markdown += f"{', '.join(open_ports) or 'None'}\n\n"
+
+            markdown += "### ⚙️ Services\n"
+            for s in services:
+                port = s.get("port")
+                name = s.get("service_name", "Unknown")
+                extended = s.get("extended_service_name", "Unknown")
+                transport = s.get("transport_protocol", "N/A")
+                product = s.get("software", [{}])[0].get("product") if s.get("software") else "N/A"
+                cert_sha256 = s.get("tls", {}).get("certificate", {}).get("fingerprint_sha256")
+
+                markdown += f"- **Port {port}/{transport}**\n"
+                markdown += f"  - Service: {name} ({extended})\n"
+                markdown += f"  - Product: {product}\n"
+
+                # Optional DNS info
+                dns_type = s.get("dns", {}).get("server_type")
+                if dns_type:
+                    markdown += f"  - DNS Server Type: {dns_type}\n"
+
+                # Optional HTTP info
+                http_resp = s.get("http", {}).get("response", {})
+                status_code = http_resp.get("status_code")
+                if status_code:
+                    server_header = http_resp.get("headers", {}).get("Server", ["N/A"])[0]
+                    markdown += f"  - HTTP Status: {status_code} ({server_header})\n"
+
+                if cert_sha256:
+                    markdown += f"  - TLS Cert SHA-256: {cert_sha256}\n"
+
+                markdown += "\n"
+
+            if cert:
+                markdown += f"🔐 **Top-level Certificate:** {cert}\n\n"
+
+            markdown += f"🔗 [View on Censys](https://search.censys.io/hosts/{observable_value})"
+            return markdown
+
+        # === Enrichment for Domains ===
+        elif observable_type == "Domain-Name":
+            certs_pages = self.certs.search(f"names: {observable_value}", per_page=100)
+            seen = {}
+            summary_flags = {"Expired": 0, "Self-Signed": 0, "Wildcard": 0, "Expires Soon": 0, "Unknown Issuer": 0}
+
+            for page in certs_pages:
+                for cert in page:
+                    parsed = cert.get("parsed", {})
+                    validity = parsed.get("validity_period", {})
+                    not_before = validity.get("not_before")
+                    not_after = validity.get("not_after")
+                    self_signed = parsed.get("is_self_signed", False)
+                    names = cert.get("names", [])
+                    issuer_dn = parsed.get("issuer_dn", "")
+                    issuer_org = parsed.get("issuer", {}).get("organization", "")
+
+                    is_expired = not_after and not_after < _current_utc_iso()
+                    is_wildcard = any(name.startswith("*.") for name in names)
+                    is_soon_expiring = False
+                    if not_after:
+                        try:
+                            days_left = _days_between(_current_utc_iso(), not_after)
+                            is_soon_expiring = 0 <= days_left <= 7
+                        except:
+                            pass
+                    is_unknown_issuer = issuer_org not in [
+                        "Let's Encrypt", "DigiCert", "Google Trust Services", 
+                        "Cloudflare Inc", "GlobalSign"
+                    ]
+
+                    if any([is_expired, self_signed, is_wildcard, is_soon_expiring, is_unknown_issuer]):
+                        subject_dn = parsed.get("subject_dn", "")
+                        key = (subject_dn, issuer_dn, not_after)
+                        if key in seen:
+                            seen[key]["count"] += 1
+                        else:
+                            seen[key] = {
+                                "sha256": cert.get("fingerprint_sha256", "N/A"),
+                                "subject_dn": subject_dn,
+                                "issuer_dn": issuer_dn,
+                                "valid_from": not_before,
+                                "valid_to": not_after,
+                                "reasons": [],
+                                "count": 1,
+                                "names": names[:3]
+                            }
+                            if is_expired: seen[key]["reasons"].append("Expired"); summary_flags["Expired"] += 1
+                            if self_signed: seen[key]["reasons"].append("Self-Signed"); summary_flags["Self-Signed"] += 1
+                            if is_wildcard: seen[key]["reasons"].append("Wildcard"); summary_flags["Wildcard"] += 1
+                            if is_soon_expiring: seen[key]["reasons"].append("Expires Soon"); summary_flags["Expires Soon"] += 1
+                            if is_unknown_issuer: seen[key]["reasons"].append("Unknown Issuer"); summary_flags["Unknown Issuer"] += 1
+
+            markdown = f"## 🔍 Censys Enrichment: Domain `{observable_value}`\n\n"
+            summary_line = " | ".join(f"{k}: {v}" for k, v in summary_flags.items() if v > 0)
+            markdown += f"### 🧾 Summary: {len(seen)} relevant certs found ({summary_line})\n\n"
+
+            if seen:
+                for cert in seen.values():
+                    markdown += f"- **Subject DN:** {cert['subject_dn']}\n"
+                    markdown += f"  - Issuer DN: {cert['issuer_dn']}\n"
+                    markdown += f"  - Validity: {cert['valid_from']} → {cert['valid_to']}\n"
+                    duration = _days_between(cert['valid_from'], cert['valid_to'])
+                    if isinstance(duration, int):
+                        markdown += f"  - Duration: {duration} days\n"
+                    markdown += f"  - ⚠️ Relevance: [{', '.join(cert['reasons'])}]\n"
+                    if cert["count"] > 1:
+                        markdown += f"  - 🔁 Seen: {cert['count']} times\n"
+                    markdown += f"  - SANs: {', '.join(cert['names']) or 'N/A'}\n"
+                    markdown += f"  - 🔗 [View Certificate](https://search.censys.io/certificates/{cert['sha256']})\n\n"
+            else:
+                markdown += "No expired, self-signed, wildcard, or suspicious certificates found.\n\n"
+
+            markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://search.censys.io/domain/{observable_value})"
+            return markdown
+
+        # === Enrichment for X.509 Certificate Fingerprint ===
+        elif observable_type == "X509-Certificate":
+            cert = self.certs.view(observable_value)
+            raw_names = cert.get("names", [])
+            names = ", ".join(raw_names) if raw_names else "N/A"
+
+            parsed = cert.get("parsed", {})
+            subject_dn = parsed.get("subject_dn", "N/A")
+            issuer_dn = parsed.get("issuer_dn", "N/A")
+            validity = parsed.get("validity_period", {})
+            valid_from = validity.get("not_before", "N/A")
+            valid_to = validity.get("not_after", "N/A")
+            self_signed = parsed.get("is_self_signed", "N/A")
+
+            key_info = parsed.get("subject_key_info", {})
+            key_algo = key_info.get("key_algorithm", "N/A")
+            key_size = key_info.get("rsa_public_key", {}).get("length", "N/A")
+
+            # Count hosts and domains using this cert
+            ip_count = 0
+            domain_count = 0
+            sample_ips = []
+            sample_domains = []
+            try:
+                hosts_pages = self.hosts.search(f"services.tls.certificate.fingerprint_sha256: {observable_value}", per_page=100)
+                ips = set()
+                for page in hosts_pages:
+                    for host in page:
+                        ip = host.get("ip")
+                        if ip:
+                            ips.add(ip)
+                            if len(sample_ips) < 2:
+                                sample_ips.append(ip)
+                ip_count = len(ips)
+
+                certs_pages = self.certs.search(f"fingerprint_sha256: {observable_value}", per_page=100)
+                domains = set()
+                for page in certs_pages:
+                    for cert in page:
+                        for name in cert.get("names", []):
+                            domains.add(name)
+                            if len(sample_domains) < 2:
+                                sample_domains.append(name)
+                domain_count = len(domains)
+            except Exception:
+                pass
+
+            markdown = f"## 🔍 Censys Enrichment: Certificate {observable_value}\n\n"
+
+            relevance_flags = []
+            if self_signed is True:
+                relevance_flags.append("Self-Signed")
+            try:
+                if valid_to < _current_utc_iso():
+                    relevance_flags.append("Expired")
+                else:
+                    days_to_expiry = _days_between(_current_utc_iso(), valid_to)
+                    if isinstance(days_to_expiry, int) and days_to_expiry <= 7:
+                        relevance_flags.append("Expires Soon")
+            except:
+                pass
+
+            if relevance_flags:
+                markdown += f"### ⚠️ Relevance: [{', '.join(relevance_flags)}]\n\n"
+
+            markdown += "### 🧾 Certificate Info\n"
+            markdown += f"- Names: {names}\n"
+            markdown += f"- Subject DN: {subject_dn}\n"
+            markdown += f"- Issuer DN: {issuer_dn}\n"
+            markdown += f"- Validity: {valid_from} → {valid_to}\n"
+            duration = _days_between(valid_from, valid_to)
+            if isinstance(duration, int):
+                markdown += f"- Duration: {duration} days\n"
+            markdown += f"- Self-Signed: {self_signed}\n\n"
+
+            markdown += "### 🔐 Public Key\n"
+            markdown += f"- Algorithm: {key_algo}\n"
+            markdown += f"- Size: {key_size} bits\n\n"
+
+            markdown += "### 🌐 Reuse Summary\n"
+            markdown += f"- Seen on: {ip_count} IP address(es)\n"
+            if sample_ips:
+                markdown += f"  - Example IPs: {', '.join(sample_ips)}\n"
+            markdown += f"- Seen on: {domain_count} domain name(s)\n"
+            if sample_domains:
+                markdown += f"  - Example Domains: {', '.join(sample_domains)}\n"
+            markdown += f"- 🔗 [Search Reuse](https://search.censys.io/hosts?q=services.tls.certificate.fingerprint_sha256:{observable_value})\n\n"
+
+            markdown += f"🔗 [View on Censys](https://search.censys.io/certificates/{observable_value})"
+            return markdown
+
+    except Exception as e:
+        return f"⚠️ Error during enrichment: {str(e)}"
