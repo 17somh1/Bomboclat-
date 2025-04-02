@@ -85,7 +85,6 @@ def _format_result(self, observable_type, observable_value):
 
         elif observable_type == "Domain-Name":
             certs_pages = self.certs.search(f"names: {observable_value}", per_page=100)
-
             markdown = f"## 🔍 Censys Enrichment: Domain `{observable_value}`\n\n"
             markdown += "### 📄 Associated Certificates\n"
             for page in certs_pages:
@@ -111,35 +110,45 @@ def _format_result(self, observable_type, observable_value):
             return markdown
 
         elif observable_type == "X509-Certificate-SHA256":
-            cert = self.certs.view(observable_value)
-            raw_names = cert.get("names", [])
-            names = ", ".join(raw_names) if raw_names else "N/A"
-
-            parsed = cert.get("parsed", {})
-            subject_dn = parsed.get("subject_dn", "N/A")
-            issuer_dn = parsed.get("issuer_dn", "N/A")
-            validity = parsed.get("validity_period", {})
-            valid_from = validity.get("not_before", "N/A")
-            valid_to = validity.get("not_after", "N/A")
-            self_signed = parsed.get("is_self_signed", "N/A")
-
-            key_info = parsed.get("subject_key_info", {})
-            key_algo = key_info.get("key_algorithm", "N/A")
-            key_size = key_info.get("rsa_public_key", {}).get("length", "N/A")
-
+            certs_pages = self.certs.search(f"fingerprint_sha256: {observable_value}", per_page=1)
+            found = False
             markdown = f"## 🔍 Censys Enrichment: Certificate `{observable_value}`\n\n"
-            markdown += "### 🧾 Certificate Info\n"
-            markdown += f"- Names: {names}\n"
-            markdown += f"- Subject DN: {subject_dn}\n"
-            markdown += f"- Issuer DN: {issuer_dn}\n"
-            markdown += f"- Validity: {valid_from} → {valid_to}\n"
-            markdown += f"- Self-Signed: {self_signed}\n\n"
 
-            markdown += "### 🔐 Public Key\n"
-            markdown += f"- Algorithm: {key_algo}\n"
-            markdown += f"- Size: {key_size} bits\n\n"
+            for page in certs_pages:
+                for cert in page:
+                    found = True
+                    raw_names = cert.get("names", [])
+                    names = ", ".join(raw_names) if raw_names else "N/A"
 
-            markdown += f"🔗 [View on Censys](https://search.censys.io/certificates/{observable_value})"
+                    parsed = cert.get("parsed", {})
+                    subject_dn = parsed.get("subject_dn", "N/A")
+                    issuer_dn = parsed.get("issuer_dn", "N/A")
+                    validity = parsed.get("validity_period", {})
+                    valid_from = validity.get("not_before", "N/A")
+                    valid_to = validity.get("not_after", "N/A")
+                    self_signed = parsed.get("is_self_signed", "N/A")
+
+                    key_info = parsed.get("subject_key_info", {})
+                    key_algo = key_info.get("key_algorithm", "N/A")
+                    key_size = key_info.get("rsa_public_key", {}).get("length", "N/A")
+
+                    markdown += "### 🧾 Certificate Info\n"
+                    markdown += f"- Names: {names}\n"
+                    markdown += f"- Subject DN: {subject_dn}\n"
+                    markdown += f"- Issuer DN: {issuer_dn}\n"
+                    markdown += f"- Validity: {valid_from} → {valid_to}\n"
+                    markdown += f"- Self-Signed: {self_signed}\n\n"
+
+                    markdown += "### 🔐 Public Key\n"
+                    markdown += f"- Algorithm: {key_algo}\n"
+                    markdown += f"- Size: {key_size} bits\n\n"
+
+                    markdown += f"🔗 [View on Censys](https://search.censys.io/certificates/{observable_value})"
+                    break
+
+            if not found:
+                return f"ℹ️ No certificate found in Censys for hash `{observable_value}`."
+
             return markdown
 
     except Exception as e:
