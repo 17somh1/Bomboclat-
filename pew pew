@@ -12,9 +12,9 @@ def _format_result(self, observable_type, observable_value):
 
             asn_info = host.get("autonomous_system", {})
             asn = asn_info.get("asn", "N/A")
-            as_org = asn_info.get("organization", "N/A")
+            asn_name = asn_info.get("name", "N/A")
+            asn_desc = asn_info.get("description", "N/A")
             bgp_prefix = asn_info.get("bgp_prefix", "N/A")
-            as_desc = asn_info.get("description", "N/A")
 
             os_info = host.get("operating_system", {})
             os_name = os_info.get("product", "N/A")
@@ -31,8 +31,8 @@ def _format_result(self, observable_type, observable_value):
 
 **📍 Location:** {country}, {city}  
 **🌐 Coordinates:** {latitude}, {longitude}  
-**🏢 ASN:** {asn} ({as_org})  
-**🧠 ASN Desc:** {as_desc}  
+**🏢 ASN:** {asn} ({asn_name})  
+**🧠 ASN Description:** {asn_desc}  
 **🧭 BGP Prefix:** {bgp_prefix}  
 **🏷️ Tags:** {tags}  
 **🕒 Last Updated:** {last_updated}  
@@ -58,12 +58,10 @@ def _format_result(self, observable_type, observable_value):
   - Service: {name} ({extended})  
   - Product: {product}"""
 
-                # Include DNS server type
                 dns_type = s.get("dns", {}).get("server_type")
                 if dns_type:
                     markdown += f"\n  - DNS Server Type: {dns_type}"
 
-                # Include HTTP status code
                 http_resp = s.get("http", {}).get("response", {})
                 status_code = http_resp.get("status_code")
                 if status_code:
@@ -86,4 +84,3 @@ def _format_result(self, observable_type, observable_value):
 
     except Exception as e:
         return f"⚠️ Error during enrichment: {str(e)}"
-
