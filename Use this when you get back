@@ -1,0 +1,68 @@
+
+
+def _format_result(self, observable_type, observable_value):
+    try:
+        if observable_type == "Domain-Name":
+            certs_pages = self.certs.search(f"names: {observable_value}", per_page=100)
+            seen = {}
+
+            for page in certs_pages:
+                for cert in page:
+                    parsed = cert.get("parsed", {})
+                    validity = parsed.get("validity_period", {})
+                    not_before = validity.get("not_before")
+                    not_after = validity.get("not_after")
+                    self_signed = parsed.get("is_self_signed", False)
+                    names = cert.get("names", [])
+
+                    is_expired = not_after and not_after < self._current_utc_iso()
+                    is_wildcard = any(name.startswith("*.") for name in names)
+
+                    if is_expired or self_signed or is_wildcard:
+                        subject_dn = parsed.get("subject_dn", "")
+                        issuer_dn = parsed.get("issuer_dn", "")
+                        key = (subject_dn, issuer_dn, not_after)
+                        if key in seen:
+                            seen[key]["count"] += 1
+                        else:
+                            seen[key] = {
+                                "sha256": cert.get("fingerprint_sha256", "N/A"),
+                                "subject_dn": subject_dn,
+                                "issuer_dn": issuer_dn,
+                                "valid_from": not_before,
+                                "valid_to": not_after,
+                                "reasons": [],
+                                "count": 1
+                            }
+                            if is_expired:
+                                seen[key]["reasons"].append("Expired")
+                            if self_signed:
+                                seen[key]["reasons"].append("Self-Signed")
+                            if is_wildcard:
+                                seen[key]["reasons"].append("Wildcard")
+
+            markdown = f"## 🔍 Censys Enrichment: Domain `{observable_value}`\n\n"
+            markdown += f"### 📄 Relevant Certificates ({len(seen)} unique found)\n\n"
+
+            if seen:
+                for key, cert in seen.items():
+                    markdown += f"- **Subject DN:** {cert['subject_dn']}\n"
+                    markdown += f"  - Issuer DN: {cert['issuer_dn']}\n"
+                    markdown += f"  - Validity: {cert['valid_from']} → {cert['valid_to']}\n"
+                    markdown += f"  - ⚠️ Relevance: {', '.join(cert['reasons'])}\n"
+                    if cert["count"] > 1:
+                        markdown += f"  - 🔁 Seen: {cert['count']} times\n"
+                    markdown += f"  - 🔗 [View certificate](https://search.censys.io/certificates/{cert['sha256']})\n\n"
+            else:
+                markdown += "No expired, self-signed, or wildcard certificates found.\n\n"
+
+            markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://search.censys.io/domain/{observable_value})"
+            return markdown
+
+    except Exception as e:
+        return f"⚠️ Error during enrichment: {str(e)}"
+
+# Helper method to compare timestamps (you should add this to your class)
+def _current_utc_iso(self):
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
