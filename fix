@@ -1,0 +1,1 @@
+markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://search.censys.io/certificates?q=parsed.names%3A%22{observable_value}%22)"
