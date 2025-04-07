@@ -182,7 +182,7 @@ def _format_result(self, observable_type, observable_value):
             else:
                 markdown += "No expired, self-signed, wildcard, or suspicious certificates found.\n\n"
 
-            markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://search.censys.io/domain/{observable_value})"
+            markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://platform.censys.io/search?q=%28{observable_value}%29+and+cert.fingerprint_sha256%3A+*)"
             return markdown
 
         # === Enrichment for X.509 Certificate Fingerprint ===
