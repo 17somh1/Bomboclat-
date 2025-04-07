@@ -111,12 +111,18 @@ def _format_result(self, observable_type, observable_value):
 
         # === Enrichment for Domains ===
         elif observable_type == "Domain-Name":
-            certs_pages = self.certs.search(f"names: {observable_value}", per_page=100)
+            MAX_DISPLAY = 10
+            PER_PAGE = 100
+            certs_pages = self.certs.search(f"names: {observable_value}", per_page=PER_PAGE)
             seen = {}
+            total_cert_count = 0
             summary_flags = {"Expired": 0, "Self-Signed": 0, "Wildcard": 0, "Expires Soon": 0, "Unknown Issuer": 0}
-
+            trusted_issuers = ["Let's Encrypt", "DigiCert", "Google Trust Services", "Cloudflare Inc", "GlobalSign"]
+        
             for page in certs_pages:
                 for cert in page:
+                    total_cert_count += 1
+        
                     parsed = cert.get("parsed", {})
                     validity = parsed.get("validity_period", {})
                     not_before = validity.get("not_before")
@@ -125,7 +131,9 @@ def _format_result(self, observable_type, observable_value):
                     names = cert.get("names", [])
                     issuer_dn = parsed.get("issuer_dn", "")
                     issuer_org = parsed.get("issuer", {}).get("organization", "")
-
+                    subject_dn = parsed.get("subject_dn", "")
+                    sha256 = cert.get("fingerprint_sha256", "N/A")
+        
                     is_expired = not_after and not_after < _current_utc_iso()
                     is_wildcard = any(name.startswith("*.") for name in names)
                     is_soon_expiring = False
@@ -135,39 +143,51 @@ def _format_result(self, observable_type, observable_value):
                             is_soon_expiring = 0 <= days_left <= 7
                         except:
                             pass
-                    is_unknown_issuer = issuer_org not in [
-                        "Let's Encrypt", "DigiCert", "Google Trust Services", 
-                        "Cloudflare Inc", "GlobalSign"
-                    ]
-
+                    is_unknown_issuer = issuer_org not in trusted_issuers
+        
                     if any([is_expired, self_signed, is_wildcard, is_soon_expiring, is_unknown_issuer]):
-                        subject_dn = parsed.get("subject_dn", "")
                         key = (subject_dn, issuer_dn, not_after)
                         if key in seen:
                             seen[key]["count"] += 1
                         else:
+                            reasons = []
+                            score = 0
+                            if is_expired: reasons.append("Expired"); summary_flags["Expired"] += 1; score += 2
+                            if self_signed: reasons.append("Self-Signed"); summary_flags["Self-Signed"] += 1; score += 5
+                            if is_wildcard: reasons.append("Wildcard"); summary_flags["Wildcard"] += 1; score += 3
+                            if is_soon_expiring: reasons.append("Expires Soon"); summary_flags["Expires Soon"] += 1; score += 1
+                            if is_unknown_issuer: reasons.append("Unknown Issuer"); summary_flags["Unknown Issuer"] += 1; score += 4
+        
                             seen[key] = {
-                                "sha256": cert.get("fingerprint_sha256", "N/A"),
+                                "sha256": sha256,
                                 "subject_dn": subject_dn,
                                 "issuer_dn": issuer_dn,
                                 "valid_from": not_before,
                                 "valid_to": not_after,
-                                "reasons": [],
+                                "reasons": reasons,
                                 "count": 1,
-                                "names": names[:3]
+                                "names": names[:3],
+                                "score": score
                             }
-                            if is_expired: seen[key]["reasons"].append("Expired"); summary_flags["Expired"] += 1
-                            if self_signed: seen[key]["reasons"].append("Self-Signed"); summary_flags["Self-Signed"] += 1
-                            if is_wildcard: seen[key]["reasons"].append("Wildcard"); summary_flags["Wildcard"] += 1
-                            if is_soon_expiring: seen[key]["reasons"].append("Expires Soon"); summary_flags["Expires Soon"] += 1
-                            if is_unknown_issuer: seen[key]["reasons"].append("Unknown Issuer"); summary_flags["Unknown Issuer"] += 1
-
+        
             markdown = f"## 🔍 Censys Enrichment: Domain `{observable_value}`\n\n"
+        
             summary_line = " | ".join(f"{k}: {v}" for k, v in summary_flags.items() if v > 0)
-            markdown += f"### 🧾 Summary: {len(seen)} relevant certs found ({summary_line})\n\n"
-
+            markdown += f"### 🧾 Certificate Summary\n"
+            markdown += f"- Total Certificates Analyzed: {total_cert_count}{' (first page only)' if total_cert_count == PER_PAGE else ''}\n"
+            markdown += f"- Relevant (Suspicious) Certificates: {len(seen)}\n"
+            markdown += f"- Flags: {summary_line}\n"
+            if total_cert_count == PER_PAGE:
+                markdown += "⚠️ *Note: Only the first 100 certificates were analyzed. There may be additional relevant certificates beyond this sample.*\n\n"
+            else:
+                markdown += "\n"
+        
             if seen:
-                for cert in seen.values():
+                top_certs = sorted(seen.values(), key=lambda c: c['score'], reverse=True)[:MAX_DISPLAY]
+        
+                markdown += f"### ⚠️ Top {len(top_certs)} Suspicious Certificates (Sorted by Risk Score)\n\n"
+        
+                for cert in top_certs:
                     markdown += f"- **Subject DN:** {cert['subject_dn']}\n"
                     markdown += f"  - Issuer DN: {cert['issuer_dn']}\n"
                     markdown += f"  - Validity: {cert['valid_from']} → {cert['valid_to']}\n"
@@ -179,10 +199,13 @@ def _format_result(self, observable_type, observable_value):
                         markdown += f"  - 🔁 Seen: {cert['count']} times\n"
                     markdown += f"  - SANs: {', '.join(cert['names']) or 'N/A'}\n"
                     markdown += f"  - 🔗 [View Certificate](https://search.censys.io/certificates/{cert['sha256']})\n\n"
+        
+                if len(seen) > MAX_DISPLAY:
+                    markdown += f"Showing top {MAX_DISPLAY} of {len(seen)} relevant certificates.\n\n"
             else:
                 markdown += "No expired, self-signed, wildcard, or suspicious certificates found.\n\n"
-
-            markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://platform.censys.io/search?q=%28{observable_value}%29+and+cert.fingerprint_sha256%3A+*)"
+        
+            markdown += f"🔗 [View all certificates for `{observable_value}` on Censys](https://search.censys.io/domain/{observable_value})"
             return markdown
 
         # === Enrichment for X.509 Certificate Fingerprint ===
