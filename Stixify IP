@@ -1,7 +1,6 @@
 def _format_result(self, observable_type, observable_value):
     try:
         from datetime import datetime, timezone
-        from stix2 import Bundle
 
         def _days_between(date1, date2):
             try:
@@ -92,10 +91,8 @@ def _format_result(self, observable_type, observable_value):
             stix_objects.append(ip_obs)
 
             if city != "N/A" and country != "N/A":
-                # Represent location as a DomainName with custom label, since OpenCTI doesn't have a native Location STIX object
                 location_obs = self.converter.create_obs(f"{city}, {country}")
                 stix_objects.append(location_obs)
-
                 rel = self.converter.create_relationship(
                     source_id=ip_obs.id,
                     relationship_type="located-at",
@@ -113,11 +110,7 @@ def _format_result(self, observable_type, observable_value):
                 )
                 stix_objects.append(rel)
 
-            if stix_objects:
-                bundle = Bundle(objects=stix_objects, allow_custom=True)
-                self.helper.send_stix2_bundle(bundle.serialize(), update=True)
-
-            return markdown
+            return markdown, stix_objects
 
     except Exception as e:
-        return f"⚠️ Error during enrichment: {str(e)}"
+        return f"⚠️ Error during enrichment: {str(e)}", []
