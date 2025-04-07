@@ -88,27 +88,31 @@ def _format_result(self, observable_type, observable_value):
             # --- STIX objects creation ---
             stix_objects = []
             ip_obs = self.converter.create_obs(observable_value)
-            stix_objects.append(ip_obs)
+            if ip_obs:
+                stix_objects.append(ip_obs)
 
-            if city != "N/A" and country != "N/A":
-                location_obs = self.converter.create_obs(f"{city}, {country}")
-                stix_objects.append(location_obs)
-                rel = self.converter.create_relationship(
-                    source_id=ip_obs.id,
-                    relationship_type="located-at",
-                    target_id=location_obs.id
-                )
-                stix_objects.append(rel)
+                # Use the proper location handler if valid
+                if city != "N/A" and country != "N/A":
+                    location_stix = self.converter._generate_stix_location(
+                        observable_id=ip_obs.id,
+                        city=city,
+                        country=country,
+                        country_code=location.get("country_code"),
+                        latitude=latitude,
+                        longitude=longitude
+                    )
+                    stix_objects.extend(location_stix)
 
-            if asn != "N/A":
-                asn_obs = self.converter.create_obs(asn_name)
-                stix_objects.append(asn_obs)
-                rel = self.converter.create_relationship(
-                    source_id=ip_obs.id,
-                    relationship_type="belongs-to",
-                    target_id=asn_obs.id
-                )
-                stix_objects.append(rel)
+                if asn != "N/A":
+                    asn_obs = self.converter.create_obs(asn_name)
+                    if asn_obs:
+                        stix_objects.append(asn_obs)
+                        rel = self.converter.create_relationship(
+                            source_id=ip_obs.id,
+                            relationship_type="belongs-to",
+                            target_id=asn_obs.id
+                        )
+                        stix_objects.append(rel)
 
             return markdown, stix_objects
 
