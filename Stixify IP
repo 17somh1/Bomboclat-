@@ -1,0 +1,123 @@
+def _format_result(self, observable_type, observable_value):
+    try:
+        from datetime import datetime, timezone
+        from stix2 import Bundle
+
+        def _days_between(date1, date2):
+            try:
+                d1 = datetime.fromisoformat(date1.replace("Z", "+00:00"))
+                d2 = datetime.fromisoformat(date2.replace("Z", "+00:00"))
+                return (d2 - d1).days
+            except:
+                return "N/A"
+
+        def _current_utc_iso():
+            return datetime.now(timezone.utc).isoformat()
+
+        # === Enrichment for IP addresses ===
+        if observable_type in ["IPv4-Addr", "IPv6-Addr"]:
+            host = self.hosts.view(observable_value)
+            services = host.get("services", [])
+            location = host.get("location", {})
+            coords = location.get("coordinates", {})
+            country = location.get("country", "N/A")
+            city = location.get("city", "N/A")
+            latitude = float(coords.get("latitude")) if coords.get("latitude") else "N/A"
+            longitude = float(coords.get("longitude")) if coords.get("longitude") else "N/A"
+
+            asn_info = host.get("autonomous_system", {})
+            asn = asn_info.get("asn", "N/A")
+            asn_name = asn_info.get("name", "N/A")
+            asn_desc = asn_info.get("description", "N/A")
+            bgp_prefix = asn_info.get("bgp_prefix", "N/A")
+
+            os_info = host.get("operating_system", {})
+            os_name = os_info.get("product", "N/A")
+            os_version = os_info.get("version", "")
+            os_vendor = os_info.get("vendor", "")
+            os_cpe = os_info.get("uniform_resource_identifier", "N/A")
+
+            tags = ", ".join(host.get("tags", [])) or "None"
+            last_updated = host.get("last_updated_at", "N/A")
+            cert = host.get("certificate")
+
+            # --- Markdown output ---
+            markdown = f"## 🔍 Censys Enrichment: IP {observable_value}\n\n"
+            markdown += f"### 📍 Location\n- Country: {country}\n- City: {city}\n- Coordinates: {latitude}, {longitude}\n\n"
+            markdown += f"### 🏢 ASN Info\n- ASN: {asn}\n- Name: {asn_name}\n- Description: {asn_desc}\n- BGP Prefix: {bgp_prefix}\n\n"
+            markdown += f"### 🏷️ Metadata\n- Tags: {tags}\n- Last Updated: {last_updated}\n\n"
+            markdown += f"### 🖥️ Operating System\n- {os_name} {os_version} ({os_vendor})\n- CPE: {os_cpe}\n\n"
+
+            markdown += "### 🔓 Open Ports\n"
+            open_ports = [
+                f"{s['port']}{' ⚠️' if s['port'] in [22, 23, 445, 3389] else ''}"
+                for s in services
+            ]
+            markdown += f"{', '.join(open_ports) or 'None'}\n\n"
+
+            markdown += "### ⚙️ Services\n"
+            for s in services:
+                port = s.get("port")
+                name = s.get("service_name", "Unknown")
+                extended = s.get("extended_service_name", "Unknown")
+                transport = s.get("transport_protocol", "N/A")
+                product = s.get("software", [{}])[0].get("product") if s.get("software") else "N/A"
+                cert_sha256 = s.get("tls", {}).get("certificate", {}).get("fingerprint_sha256")
+
+                markdown += f"- **Port {port}/{transport}**\n  - Service: {name} ({extended})\n  - Product: {product}\n"
+
+                dns_type = s.get("dns", {}).get("server_type")
+                if dns_type:
+                    markdown += f"  - DNS Server Type: {dns_type}\n"
+
+                http_resp = s.get("http", {}).get("response", {})
+                status_code = http_resp.get("status_code")
+                if status_code:
+                    server_header = http_resp.get("headers", {}).get("Server", ["N/A"])[0]
+                    markdown += f"  - HTTP Status: {status_code} ({server_header})\n"
+
+                if cert_sha256:
+                    markdown += f"  - TLS Cert SHA-256: {cert_sha256}\n"
+
+                markdown += "\n"
+
+            if cert:
+                markdown += f"🔐 **Top-level Certificate:** {cert}\n\n"
+
+            markdown += f"🔗 [View on Censys](https://search.censys.io/hosts/{observable_value})"
+
+            # --- STIX objects creation ---
+            stix_objects = []
+            ip_obs = self.converter.create_obs(observable_value)
+            stix_objects.append(ip_obs)
+
+            if city != "N/A" and country != "N/A":
+                # Represent location as a DomainName with custom label, since OpenCTI doesn't have a native Location STIX object
+                location_obs = self.converter.create_obs(f"{city}, {country}")
+                stix_objects.append(location_obs)
+
+                rel = self.converter.create_relationship(
+                    source_id=ip_obs.id,
+                    relationship_type="located-at",
+                    target_id=location_obs.id
+                )
+                stix_objects.append(rel)
+
+            if asn != "N/A":
+                asn_obs = self.converter.create_obs(asn_name)
+                stix_objects.append(asn_obs)
+                rel = self.converter.create_relationship(
+                    source_id=ip_obs.id,
+                    relationship_type="belongs-to",
+                    target_id=asn_obs.id
+                )
+                stix_objects.append(rel)
+
+            if stix_objects:
+                bundle = Bundle(objects=stix_objects, allow_custom=True)
+                self.helper.send_stix2_bundle(bundle.serialize(), update=True)
+
+            return markdown
+
+    except Exception as e:
+        return f"⚠️ Error during enrichment: {str(e)}"
