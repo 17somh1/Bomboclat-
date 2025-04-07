@@ -1,32 +1,47 @@
-    def _generate_stix_location(self, data):
-        # Generate City Location
-        stix_city_location = stix2.Location(
-            id=Location.generate_id(data["city"], "City"),
-            name=data["city"],
-            country=data["country_name"],
-            latitude=data["latitude"],
-            longitude=data["longitude"],
-            custom_properties={"x_opencti_location_type": "City"},
-        )
-        self.stix_objects.append(stix_city_location)
-        # Generate Relationship : observable -> "located-at" -> city
-        observable_to_city = self._generate_stix_relationship(
-            self.stix_entity["id"], "located-at", stix_city_location.id
-        )
-        self.stix_objects.append(observable_to_city)
-        # Generate Country Location
-        stix_country_location = stix2.Location(
-            id=Location.generate_id(data["country_name"], "Country"),
-            name=data["country_name"],
-            country=data["country_name"],
-            custom_properties={
-                "x_opencti_location_type": "Country",
-                "x_opencti_aliases": [data["country_code"]],
-            },
-        )
-        self.stix_objects.append(stix_country_location)
-        # Generate Relationship : city -> "located-at" -> country
-        city_to_country = self._generate_stix_relationship(
-            stix_city_location.id, "located-at", stix_country_location.id
-        )
-        self.stix_objects.append(city_to_country)
+def _generate_stix_location(self, observable_id, city, country, country_code=None, latitude=None, longitude=None):
+    stix_objects = []
+
+    # City object
+    city_location = stix2.Location(
+        id=Location.generate_id(city, "City"),
+        name=city,
+        country=country,
+        latitude=latitude,
+        longitude=longitude,
+        custom_properties={"x_opencti_location_type": "City"}
+    )
+    stix_objects.append(city_location)
+
+    # IP or domain -> located-at -> city
+    ip_to_city = stix2.Relationship(
+        relationship_type="located-at",
+        source_ref=observable_id,
+        target_ref=city_location.id,
+        created_by_ref=self.author["id"],
+        external_references=self.external_reference
+    )
+    stix_objects.append(ip_to_city)
+
+    # Country object
+    country_location = stix2.Location(
+        id=Location.generate_id(country, "Country"),
+        name=country,
+        country=country,
+        custom_properties={
+            "x_opencti_location_type": "Country",
+            "x_opencti_aliases": [country_code] if country_code else []
+        }
+    )
+    stix_objects.append(country_location)
+
+    # city -> located-at -> country
+    city_to_country = stix2.Relationship(
+        relationship_type="located-at",
+        source_ref=city_location.id,
+        target_ref=country_location.id,
+        created_by_ref=self.author["id"],
+        external_references=self.external_reference
+    )
+    stix_objects.append(city_to_country)
+
+    return stix_objects
