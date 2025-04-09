@@ -1,0 +1,31 @@
+# === 🔐 TLS Certificates ===
+from stix2 import X509Certificate, Relationship
+
+seen_certs = set()
+
+for s in services:
+    tls_cert = s.get("tls", {}).get("certificate", {})
+    cert_fingerprint = tls_cert.get("fingerprint_sha256")
+
+    if cert_fingerprint and cert_fingerprint not in seen_certs:
+        seen_certs.add(cert_fingerprint)
+
+        # Create X.509 Certificate observable
+        cert_obs = X509Certificate(
+            hashes={"SHA-256": cert_fingerprint},
+            custom_properties={
+                "x_opencti_created_by_ref": self.converter.author["id"],
+                "x_opencti_external_references": self.converter.external_reference,
+            },
+        )
+        stix_objects.append(cert_obs)
+
+        # Create "uses" relationship from IP to cert
+        cert_rel = Relationship(
+            relationship_type="uses",
+            source_ref=ip_obs.id,
+            target_ref=cert_obs.id,
+            created_by_ref=self.converter.author["id"],
+            external_references=self.converter.external_reference,
+        )
+        stix_objects.append(cert_rel)
