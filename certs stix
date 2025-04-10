@@ -1,0 +1,50 @@
+    # === STIX creation ===
+    stix_objects = []
+
+    cert_obs = self.converter.create_certificate(observable_value)
+    if cert_obs:
+        stix_objects.append(cert_obs)
+
+        # Domains this cert was used for
+        for name in names[:5]:  # Limit to avoid clutter
+            domain_obs = self.converter.create_obs(name)
+            if domain_obs:
+                stix_objects.append(domain_obs)
+                rel = self.converter.create_relationship(
+                    source_id=cert_obs.id,
+                    relationship_type="related-to",
+                    target_id=domain_obs.id
+                )
+                stix_objects.append(rel)
+
+        # Reuse on IPs
+        try:
+            hosts_pages = self.hosts.search(f"services.tls.certificate.fingerprint_sha256: {observable_value}", per_page=50)
+            seen_ips = set()
+            for page in hosts_pages:
+                for host in page:
+                    ip = host.get("ip")
+                    if ip and ip not in seen_ips:
+                        seen_ips.add(ip)
+                        ip_obs = self.converter.create_obs(ip)
+                        if ip_obs:
+                            stix_objects.append(ip_obs)
+                            rel = self.converter.create_relationship(
+                                source_id=cert_obs.id,
+                                relationship_type="related-to",
+                                target_id=ip_obs.id
+                            )
+                            stix_objects.append(rel)
+        except Exception as e:
+            self.helper.log_error(f"[Cert Enrichment] Error fetching reuse data: {str(e)}")
+
+        # Optionally add issuer as identity
+        issuer_identity = self.converter.create_ca_identity(issuer_org)
+        if issuer_identity:
+            stix_objects.append(issuer_identity)
+            rel = self.converter.create_relationship(
+                source_id=cert_obs.id,
+                relationship_type="issued-by",
+                target_id=issuer_identity.id
+            )
+            stix_objects.append(rel)
