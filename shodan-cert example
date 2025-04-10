@@ -1,0 +1,38 @@
+Convertertostix:
+
+def create_certificate(self, cert_data):
+    from stix2 import X509Certificate
+
+    return X509Certificate(
+        type="x509-certificate",
+        issuer=cert_data["issuer_dn"],
+        subject=cert_data["subject_dn"],
+        validity_not_before=cert_data["valid_from"],
+        validity_not_after=cert_data["valid_to"],
+        hashes={"SHA-256": cert_data["sha256"]},
+        custom_properties={
+            "x_opencti_created_by_ref": self.author["id"],
+            "x_opencti_external_references": self.external_reference,
+        }
+    )
+
+
+Format result:
+
+# For each cert in your list
+cert_stix = self.converter.create_certificate({
+    "issuer_dn": cert["issuer_dn"],
+    "subject_dn": cert["subject_dn"],
+    "valid_from": cert["valid_from"],
+    "valid_to": cert["valid_to"],
+    "sha256": cert["sha256"]
+})
+stix_objects.append(cert_stix)
+
+# Create relationship: domain -> cert
+rel = self.converter.create_relationship(
+    source_id=ip_or_domain_obs.id,
+    relationship_type="related-to",
+    target_id=cert_stix.id
+)
+stix_objects.append(rel)
