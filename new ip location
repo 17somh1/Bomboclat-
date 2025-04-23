@@ -1,0 +1,13 @@
+if ip_obs and isinstance(ip_obs, dict):
+    clean_ip_obs = {k: v for k, v in {**ip_obs, "id": ip_obs["standard_id"]}.items() if k not in {"__typename", "x_opencti_id"}}
+    stix_objects.append(clean_ip_obs)
+
+    if city != "N/A" and country != "N/A":
+        stix_objects.extend(self.converter._generate_stix_location(
+            observable_id=ip_obs["standard_id"],
+            city=city,
+            country=country,
+            country_code=location.get("country_code"),
+            latitude=latitude,
+            longitude=longitude
+        ))
