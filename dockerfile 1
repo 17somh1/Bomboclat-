@@ -1,0 +1,48 @@
+# Use the dev/staging base image
+FROM docker-staging.alf.uk/python:3.12-slim
+
+# Environment config
+ENV CONNECTOR_TYPE=INTERNAL_ENRICHMENT
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+# Metadata
+LABEL CMDB_AppId="AL23103"
+
+# Create and switch to non-root user
+ARG user=myuser
+ARG group=myuser
+ARG uid=1000
+ARG gid=1000
+
+RUN getent group ${group} || addgroup --gid ${gid} ${group} \
+ && id -u ${user} || adduser --uid ${uid} --gid ${gid} --disabled-password --gecos "" ${user}
+
+# Copy CA certificate if needed
+COPY Cloud-Services-Root-CA.crt /usr/local/share/ca-certificates/Cloud-Services-Root-CA.crt
+RUN chmod 644 /usr/local/share/ca-certificates/Cloud-Services-Root-CA.crt \
+ && update-ca-certificates
+
+# Optional: install additional system packages
+# RUN apk add --no-cache git build-base libmagic libffi libxml2 libxslt  # Alpine version
+RUN apt-get update && apt-get install -y \
+    git build-essential libmagic-dev libffi-dev libxml2-dev libxslt-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy connector source code and pip config
+COPY src /opt/connector
+COPY pip.conf /etc/pip.conf
+
+# Set working directory
+WORKDIR /opt/connector
+
+# Give ownership to non-root user
+RUN chown -R ${uid}:${gid} /opt/connector
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Switch to non-root user
+USER ${uid}:${gid}
+
+# Define entrypoint
+ENTRYPOINT ["python", "connector.py"]
