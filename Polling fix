@@ -1,0 +1,24 @@
+MAX_RETRIES = 5
+value_to_check = main_obs.get("value")
+found = False
+
+for attempt in range(MAX_RETRIES):
+    try:
+        if attempt > 0:
+            time.sleep(1)
+
+        result = self.helper.api.stix_cyber_observable.read({"value": value_to_check})
+
+        if result:
+            self.helper.log_info(f"[Censys] Observable '{value_to_check}' is indexed.")
+            found = True
+            break
+        else:
+            self.helper.log_info(f"[Censys] Not indexed yet (attempt {attempt + 1})...")
+    except requests.exceptions.ReadTimeout:
+        self.helper.log_info(f"[Censys] Timeout while polling (attempt {attempt + 1})...")
+        time.sleep(1)
+
+if not found:
+    self.helper.log_error(f"[Censys] Failed: '{value_to_check}' was never indexed.")
+    return
