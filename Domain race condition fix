@@ -1,0 +1,25 @@
+self.helper.log_info(f"Created domain observable: {domain_observable.id}")
+stix_objects.append(domain_observable)
+
+# Wait until domain is indexed before creating relationship
+MAX_RETRIES = 5
+for attempt in range(MAX_RETRIES):
+    try:
+        if self.helper.api.stix_cyber_observable.read(value=domain):
+            self.helper.log_info(f"[Censys] Domain '{domain}' is indexed (attempt {attempt+1})")
+            break
+    except Exception as e:
+        self.helper.log_info(f"[Censys] Polling failed for domain '{domain}': {e}")
+    time.sleep(1)
+else:
+    self.helper.log_error(f"[Censys] Domain '{domain}' was never indexed. Skipping relationship.")
+    continue
+
+# Now safe to create relationship
+self.helper.log_info(f"Creating relationship: IP:{ip_obs['standard_id']} with Domain:{domain_observable.id}")
+rel = self.converter.create_relationship(
+    source_id=standard_id,
+    relationship_type="related-to",
+    target_id=domain_observable.id,
+)
+stix_objects.append(rel)
